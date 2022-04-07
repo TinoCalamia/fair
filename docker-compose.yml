@@ -1,0 +1,22 @@
+version: "1.0"
+
+services:
+  nbk:
+    #container_name: computer-vison
+    #image: tensorflow/tensorflow:latest-gpu-py3-jupyter
+    #image: python:latest
+    build: .
+    volumes:
+      - "./:/tf/notebooks"
+    ports:
+     - "8888:8888"
+    deploy:
+      resources:
+        reservations:
+          devices:
+          -  driver: nvidia
+             count: all
+             capabilities: [gpu]
+    entrypoint: ["jupyter", "lab", "--ip=0.0.0.0", "--allow-root"]
+networks:
+  fair:
