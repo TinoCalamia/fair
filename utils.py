@@ -1,3 +1,5 @@
+from lime import lime_image
+from lime.wrappers.scikit_image import SegmentationAlgorithm
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -93,19 +95,31 @@ def normalize_distances(df, distance_column = 'distance', threshold = .5):
 
     return df
 
-def verify_faces(df, model, performance_metrics= [roc_auc_score, accuracy_score], face_count= 100, distance_metric='cosine'):
+def verify_faces(df, model, performance_metrics= [roc_auc_score, accuracy_score], face_count= 100, distance_metric='cosine', preprocessing  = None):
     df['distance'] = np.nan
     df['verified'] = np.nan
 
     df=df.sample(frac=1)[:face_count]
 
     for i in range(0,len(df)):
-
-        verification_result = DeepFace.verify(img1_path = df.iloc[i].original_image,
-                          img2_path = df.iloc[i].compare_image,
-                          distance_metric = distance_metric,
-                           model = model,
-                        enforce_detection=False)
+        if preprocessing is None:
+            verification_result = DeepFace.verify(
+                img1_path = df.iloc[i].original_image,
+                img2_path = df.iloc[i].compare_image,
+                distance_metric = distance_metric,
+                model = model,
+                enforce_detection=False)
+        else:
+            img1 = preprocessing(df.iloc[i].original_image)
+            img2 = preprocessing(df.iloc[i].compare_image)
+            
+            verification_result = DeepFace.verify(
+                img1_path = img1,
+                img2_path = img2,
+                distance_metric = distance_metric,
+                model = model,
+                enforce_detection=False)
+            
         df.distance.iloc[i] = verification_result['distance']
         df.verified.iloc[i] = verification_result['verified']
         
@@ -122,20 +136,47 @@ def verify_faces(df, model, performance_metrics= [roc_auc_score, accuracy_score]
 
 
 # EVALUATION FUNCTIONS
-def calculate_confidence_interval(model, race, metric='roc_auc_score'):
+def calculate_confidence_interval(model, race, metric=roc_auc_score):
+
     directory = f"results/{model}/{race}"
-    scores = []
+    y_pred = []
+    y_true = []
     for root, subdirectories, files in os.walk(directory):
         for file in files:
             with open(os.path.join(directory,file), "rb") as f:
                 results = pickle.load(f)
-            scores.append(results[metric])
+            y_pred.append(results["data"].distance)
+            y_true.append(results["data"].is_same_person)
+    y_pred = np.array(y_pred).ravel()
+    y_true = np.array(y_true).ravel()
 
-    lower_ci, higher_ci = st.t.interval(0.95, len(scores)-1, loc=np.mean(scores), scale=st.sem(scores))
-    if higher_ci>1:
-        higher_ci=1
 
-    return np.mean(scores), lower_ci, higher_ci
+
+    n_bootstraps = 300
+    rng_seed = 42  # control reproducibility
+    bootstrapped_scores = []
+
+    rng = np.random.RandomState(rng_seed)
+    for i in range(n_bootstraps):
+        # bootstrap by sampling with replacement on the prediction indices
+        indices = rng.randint(0, len(y_pred), 1000)
+        if len(np.unique(y_true[indices])) < 2:
+            # We need at least one positive and one negative sample for ROC AUC
+            # to be defined: reject the sample
+            continue
+        if metric == accuracy_score:
+            score = metric(y_true[indices], np.round(1-y_pred[indices]))
+        else:
+            score = metric(y_true[indices], 1-y_pred[indices])
+        bootstrapped_scores.append(score)
+
+    # Computing the lower and upper bound of the 90% confidence interval
+    # You can change the bounds percentiles to 0.025 and 0.975 to get
+    # a 95% confidence interval instead.
+    confidence_lower, confidence_upper = st.t.interval(0.95, len(bootstrapped_scores)-1, loc=np.mean(bootstrapped_scores), scale=st.sem(bootstrapped_scores))
+    
+    return np.mean(bootstrapped_scores), confidence_lower, confidence_upper
+    
 
 
 def calculate_performance_per_threshold(model, race):
@@ -278,14 +319,13 @@ def perform_significance_test(model, race1, race2, test_type = st.wilcoxon):
     return test_type(data1.distance, data2.distance)
 
 def plot_face_heatmap(model, loaded_images):
-    e = shap.GradientExplainer(model, data = loaded_images)
 
     explainer = lime_image.LimeImageExplainer(verbose = True)
-    segmenter = SegmentationAlgorithm('slic', n_segments=1000, compactness=0.5, sigma=0)
+    segmenter = SegmentationAlgorithm('slic', n_segments=1000, compactness=1, sigma=-1)
 
-    explanation = explainer.explain_instance(loaded_images[0].astype('double'), 
+    explanation = explainer.explain_instance(loaded_images.astype('double'), 
                                              classifier_fn = model.predict, 
-                                             top_labels=2, hide_color=5, num_samples=10,)# segmentation_fn=segmenter)
+                                             top_labels=2, hide_color=4, num_samples=30,)# segmentation_fn=segmenter)
 
 
 
