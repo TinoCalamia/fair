@@ -244,7 +244,7 @@ def calculate_distribution_difference(model, race):
             distances = distances.append(pd.DataFrame(data))
     
 
-    return distances.groupby("is_same_person").distance.mean().diff().loc[1]
+    return distances.groupby("is_same_person").distance.mean().loc[True] - distances.groupby("is_same_person").distance.mean().loc[False]
 
 def plot_performance_per_threshold(model):
 

@@ -1,2 +1,9 @@
 *.tar
 data/
+*-checkpoint.ipynb
+.ipynb_checkpoints/
+deprecated/
+*.pyc
+*.pb
+*.h5
+*-checkpoint.py

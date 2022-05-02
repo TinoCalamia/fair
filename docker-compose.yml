@@ -14,8 +14,8 @@ services:
       resources:
         reservations:
           devices:
-          -  #driver: nvidia
-             #count: all
+          -  driver: nvidia
+             count: all
              capabilities: [gpu]
     entrypoint: ["jupyter", "lab", "--ip=0.0.0.0", "--allow-root"]
 networks:
