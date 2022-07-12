@@ -5,21 +5,27 @@ import matplotlib.pyplot as plt
 import os
 import pandas as pd
 import pickle
-import seaborn as sns
 import random
 import re
+import scipy.stats as st
+import seaborn as sns
 from sklearn.metrics import roc_auc_score, classification_report, precision_score, accuracy_score
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.utils import shuffle
-import scipy.stats as st
 import tensorflow as tf
 
 #import cv2
 from deepface import DeepFace
 
 
-# CREATE DF
+
 def create_base_race_df(race, size = 1000):
+    """Create dataframe for a given race.
+
+    race (str): Ethnicity for which the dataframe needs to be created
+    size (int): Count of instances for a dataframe
+
+    """
     # create comparison dataframes for African faces
     directory = f"data/race_per_7000/{race}"
     evaluation_df = pd.DataFrame(columns=['original_image','original_person'])
@@ -36,48 +42,65 @@ def create_base_race_df(race, size = 1000):
                                                          'original_person':person_folder},index=[0]))
     return evaluation_df
 
-def create_same_person_dataset(df):
+def create_same_person_dataset(base_data):
+    """Create dataframe for same person.
+
+    base_data (pd.DataFrame): Dataframe including column with image paths
+
+    """
     
     # create random same person df
-    same_person = df.sample(int(len(df)/2))
-    same_person['compare_person'] =same_person.original_person
-    # get random image from same person
-    same_person['compare_image'] = same_person.original_person.apply(lambda x: random.choice(os.listdir(x)))
-    # create total image path
-    same_person['compare_image'] = same_person['compare_person']+'/'+same_person['compare_image']
-    same_person['is_same_person'] =True
-    
-    return same_person
+    same_person_df = base_data.sample(int(len(base_data)/2))
+    same_person_df['compare_person'] =same_person_df.original_person
 
-def create_different_person_dataset(df):
+    # get random image from same person
+    same_person_df['compare_image'] = same_person_df.original_person.apply(lambda x: random.choice(os.listdir(x)))
+
+    # create total image path
+    same_person_df['compare_image'] = same_person_df['compare_person']+'/'+same_person_df['compare_image']
+    same_person_df['is_same_person'] =True
     
-    different_person = df
+    return same_person_df
+
+def create_different_person_dataset(base_data):
+
+    """Create dataframe for comparing different persons.
+
+    base_data (pd.DataFrame): Dataframe including column with image paths
+
+    """
+    
     # randomly assing images to entire dataset
-    different_person['compare_image'] = shuffle(different_person.original_image)
+    base_data['compare_image'] = shuffle(base_data.original_image)
     
     # Define regex "including until 4th slash"
     p = re.compile('.*/.*/.*/.*/')
     # cut total image path to only return person
-    different_person['compare_person'] = different_person['compare_image'].apply(lambda x:
+    base_data['compare_person'] = base_data['compare_image'].apply(lambda x:
                                                                 p.findall(x)[0][:-1])
 
-    different_person['is_same_person'] = False
+    base_data['is_same_person'] = False
     # Only filter rows with different persons
-    different_person = different_person[
-        (different_person.compare_person!=different_person.original_person)].drop_duplicates().sample(int(len(df)/2))
+    different_person_df = base_data[
+        (base_data.compare_person!=base_data.original_person)].drop_duplicates().sample(int(len(df)/2))
     
-    return different_person
+    return different_person_df
 
-def create_evaluation_dataset(df):
+def create_evaluation_dataset(base_data):
+    """Create final dataset including positive and negative image pairs.
+
+    base_data (pd.DataFrame): Dataframe including column with image paths
+
+    """
+
     # create random same person df
-    same_person = create_same_person_dataset(df)
+    same_person_df = create_same_person_dataset(base_data)
     
     # create random different person df
-    different_person = create_different_person_dataset(df)
-
+    different_person_df = create_different_person_dataset(base_data)
     
     # Create target variable
-    evaluation = same_person.append(different_person)
+    evaluation = same_person_df.append(different_person_df)
     evaluation.is_same_person = evaluation.is_same_person.fillna(False)
     
     print('Target distribution is:')
@@ -87,15 +110,38 @@ def create_evaluation_dataset(df):
 
 # PREDICTION FUNCTIONS
 
-def normalize_distances(df, distance_column = 'distance', threshold = .5):
+def normalize_distances(base_data, distance_column = 'distance', threshold = .5):
+    """Normalizing distance metric to scale values to 0 and 1.
+
+    base_data (pd.DataFrame): Dataframe including column with image paths
+    distance_column (str): Name of the column which needs to be normalized
+    threshold (float): Normalized score threshold to be used for classifying into positive and negative
+
+    """
     
-    df['distance_normalised'] = MinMaxScaler().fit_transform(np.array(df[distance_column]).reshape(-1, 1))
-    df.loc[df.distance_normalised>threshold,"verified_normalised"] = False
-    df.loc[df.distance_normalised<threshold,"verified_normalised"] = True
+    base_data['distance_normalised'] = MinMaxScaler().fit_transform(np.array(base_data[distance_column]).reshape(-1, 1))
+    base_data.loc[base_data.distance_normalised>threshold,"verified_normalised"] = False
+    base_data.loc[base_data.distance_normalised<threshold,"verified_normalised"] = True
 
-    return df
+    return base_data
 
-def verify_faces(df, model, performance_metrics= [roc_auc_score, accuracy_score], face_count= 100, distance_metric='cosine', preprocessing  = None):
+def verify_faces(base_data, 
+                model, 
+                performance_metrics= [roc_auc_score, accuracy_score], 
+                face_count= 100, 
+                distance_metric='cosine', 
+                preprocessing  = None):
+    """Calculate distance between image pairs.
+
+    base_data (pd.DataFrame): Dataframe including positive and negative image pairs 
+    model (loaded model): Loaded model
+    performance_metrics (list): List of functions of evaluation metrics
+    face_count (str): Batch size for face verfication
+    distance_metric (str): Distance function to be used for similarity calculation
+    preprocessing (function): Preprocessing method to be applied
+
+    """
+
     df['distance'] = np.nan
     df['verified'] = np.nan
 
@@ -137,6 +183,14 @@ def verify_faces(df, model, performance_metrics= [roc_auc_score, accuracy_score]
 
 # EVALUATION FUNCTIONS
 def calculate_confidence_interval(model, race, metric=roc_auc_score):
+    """Calculate 95% confidence interval for a given evaluation metric.
+
+    model (str): Name of the model 
+    race (str): Name of Race
+    performance_metrics (list): List of functions of evaluation metrics
+    metric (function): Evaluation function to be applied
+
+    """
 
     directory = f"results/{model}/{race}"
     y_pred = []
@@ -180,6 +234,13 @@ def calculate_confidence_interval(model, race, metric=roc_auc_score):
 
 
 def calculate_performance_per_threshold(model, race):
+    """Calculate the performance of evaluation metrics for different thresholds.
+
+    model (str): Name of the model 
+    race (str): Name of Race
+
+    """
+
     # Final df
     performance = pd.DataFrame()
     
@@ -210,6 +271,12 @@ def calculate_performance_per_threshold(model, race):
 
 # PLOTTING FUNCTIONS
 def group_distances(distances, groupby):
+    """Group and count distances.
+
+    distances (pd.DataFrame): Dataframe containing the calculated distances in column named 'distances'
+    groupby (str): Column on which the dataframe will be grouped by
+
+    """
     
     distances['distance'] = MinMaxScaler().fit_transform(np.array(distances.distance).reshape(-1, 1))
     distances = round(distances,1)
@@ -220,6 +287,14 @@ def group_distances(distances, groupby):
     return grouped_distances
 
 def count_distances(model, race, groupby = ['distance']):
+    """Count number of distances.
+
+    model (str): Name of the model 
+    race (str): Name of Race
+    groupby (str): Column on which the dataframe will be grouped by
+
+    """
+
     directory = f"results/{model}/{race}"
     distances = pd.DataFrame()
     
@@ -233,6 +308,12 @@ def count_distances(model, race, groupby = ['distance']):
     return group_distances(distances, groupby)
 
 def calculate_distribution_difference(model, race):
+    """Calculate differences between distributions.
+
+    model (str): Name of the model 
+    race (str): Name of Race
+
+    """
     directory = f"results/{model}/{race}"
     distances = pd.DataFrame()
     
@@ -247,6 +328,11 @@ def calculate_distribution_difference(model, race):
     return distances.groupby("is_same_person").distance.mean().loc[True] - distances.groupby("is_same_person").distance.mean().loc[False]
 
 def plot_performance_per_threshold(model):
+    """Plot performance for different thresholds.
+
+    model (str): Name of the model 
+
+    """
 
     african_thresholds = calculate_performance_per_threshold(model = model, race = 'African')
     asian_thresholds = calculate_performance_per_threshold(model = model, race = 'Asian')
@@ -263,9 +349,15 @@ def plot_performance_per_threshold(model):
     sns.barplot(x='threshold', y='score', data= indian_thresholds, ax=axes[1,1]).set_title('Indian scores')
     axes[1,1].tick_params(labelrotation=45)
     f.suptitle(f'{model} performance by threshold')
-    plt.show();
+    plt.show()
 
 def get_metric_comparision(model, metric):
+    """Create a summary for a given model and metric for all ethnicities.
+
+    model (str): Name of the model
+    metric (function): Evaluation function to be applied
+
+    """
     score_summary = pd.DataFrame()
     for race in ['Indian', 'Caucasian', 'African', 'Asian']:
         mean, lower_ci, higher_ci = calculate_confidence_interval(model = model, race = race, 
@@ -278,6 +370,13 @@ def get_metric_comparision(model, metric):
     return score_summary
 
 def plot_score_distribution(model, groupby=['distance'], hue=None):
+    """Plot score distribution.
+
+    model (str): Name of the model 
+    groupby (list): Column as list which will be grouped
+    hue (str): Column on which the hue will be applied
+
+    """
 
     african_distances = count_distances(model = model, race = 'African',
                                        groupby=groupby).rename(columns={'original_image':'counts'})
@@ -303,6 +402,14 @@ def plot_score_distribution(model, groupby=['distance'], hue=None):
 # EVALUATION FUNCTIONS
 
 def perform_significance_test(model, race1, race2, test_type = st.wilcoxon):
+    """Plot score distribution.
+
+    model (str): Name of the model 
+    race1 (str): Name of first race
+    race2 (str): Name of second race
+    test_type (function): Function for statistical significance test
+
+    """
     data1 = pd.DataFrame()
     data2 = pd.DataFrame()
     for j in range(1,6):
@@ -319,6 +426,12 @@ def perform_significance_test(model, race1, race2, test_type = st.wilcoxon):
     return test_type(data1.distance, data2.distance)
 
 def plot_face_heatmap(model, loaded_images):
+    """Plot score distribution.
+
+    model (str): Name of the model 
+    loaded_images (function): Loaded images
+
+    """
 
     explainer = lime_image.LimeImageExplainer(verbose = True)
     segmenter = SegmentationAlgorithm('slic', n_segments=1000, compactness=1, sigma=-1)
@@ -339,4 +452,4 @@ def plot_face_heatmap(model, loaded_images):
     #Plot. The visualization makes more sense if a symmetrical colorbar is used.
     plt.imshow(heatmap, cmap = 'RdBu', vmin  = -heatmap.max(), vmax = heatmap.max())
     plt.colorbar()
-    plt.axis('off');
+    plt.axis('off')
