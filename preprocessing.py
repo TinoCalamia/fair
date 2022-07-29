@@ -3,6 +3,13 @@ import cv2
 
 
 def read_this(image_file, gray_scale=False):
+    """Read image passing file path.
+
+    image_file (str): Path to image
+    gray_scale (bool): Pass boolean to indicate if image is coloured or not.
+
+    """
+
     image_src = cv2.imread(image_file)
     if gray_scale:
         image_src = cv2.cvtColor(image_src, cv2.COLOR_BGR2GRAY)
@@ -11,8 +18,19 @@ def read_this(image_file, gray_scale=False):
     return image_src
 
 def equalize_image(image_file, with_plot=False, gray_scale=False):
+    """Apply histogram equalization to image.
+
+    image_file (str): Path to image
+    with_plot (bool): Return processed image
+    gray_scale (bool): Pass boolean to indicate if image is coloured or not.
+    
+    """
+
+    # read image
     image_src = read_this(image_file=image_file, gray_scale=gray_scale)
+
     if not gray_scale:
+        # if image is not gray scale process each layer individually
         r_image, g_image, b_image = cv2.split(image_src)
 
         r_image_eq = cv2.equalizeHist(r_image)
@@ -25,6 +43,7 @@ def equalize_image(image_file, with_plot=False, gray_scale=False):
         image_eq = cv2.equalizeHist(image_src)
         cmap_val = 'gray'
 
+    # plot processed image
     if with_plot:
         fig = plt.figure(figsize=(10, 20))
 
@@ -40,9 +59,22 @@ def equalize_image(image_file, with_plot=False, gray_scale=False):
     return image_eq
 
 def apply_clahe(image_file, with_plot=False, gray_scale=False):
+    """Apply CLAHE to image.
+
+    image_file (str): Path to image
+    with_plot (bool): Return processed image
+    gray_scale (bool): Pass boolean to indicate if image is coloured or not.
+    
+    """
+
+    # read image
     image_src = read_this(image_file=image_file, gray_scale=gray_scale)
+
+    # define CLAHE parameters
     clahe = cv2.createCLAHE(clipLimit =4.0)
+
     if not gray_scale:
+        # if image is not gray scale process each layer individually
         r_image, g_image, b_image = cv2.split(image_src)
 
         r_image_eq = clahe.apply(r_image)
