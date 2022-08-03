@@ -1,5 +1,5 @@
 *.tar
-data/
+data/race_per_7000
 *-checkpoint.ipynb
 .ipynb_checkpoints/
 deprecated/
